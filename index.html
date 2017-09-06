@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
+<link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.6/css/bootstrap.css">
+<style>
+#list {
+    overflow: scroll;
+    max-height: 500px;
+}
+#xml {
+    overflow: scroll;
+    max-height: 500px;
+}
+
+#xml .xml-expand {
+    color: green;
+}
+
+#xml .xml-tag {
+    color: #04049b;
+    white-space: nowrap;
+}
+
+#xml .xml-attr-key {
+    color: #f7a278;
+    margin-left: 10px;
+}
+
+#xml .xml-attr-value {
+    color: #9a3503;
+}
+
+</style>
+</head>
+<body>
+<div class="container">
+    <div class="row">
+        <div class="col-md-2" id="list">
+        </div>
+        <div class="col-md-5" id="xml">
+            XML
+        </div>
+        <div class="col-md-5">
+            Preview
+        </div>
+    </div>
+</div>
+<script>
+$.get('data/list', function(data){
+        data.split("\n").map(function(file){
+            var a_dom = $('<a></a>');
+            a_dom.attr('href', '#');
+            a_dom.text(file);
+            a_dom.data('file', 'data/' + file);
+            a_dom.css('display', 'block');
+            $('#list').append(a_dom);
+        });
+        $('#list a:first').click();
+}, 'text');
+
+var tag_seq = 0;
+var indent_width = 20;
+var walk_akoma_xml = function(dom, indent){
+    tag_seq ++;
+    var current_tag_seq = tag_seq;
+
+    if (dom.nodeType == 9) { // Document
+        tag_seq = 0;
+        return walk_akoma_xml(dom.childNodes[0], 0);
+    }
+
+    if (dom.nodeType == 8) { // Comment
+        return {xml: [], text: []};
+    }
+
+    if (dom.nodeType == 1) { // Element
+        if (dom.childNodes.length == 0) { // 沒內容的 XML
+            var div_dom = $('<div></div>').addClass('xml-tag');
+            div_dom.text('<' + dom.nodeName);
+            for (var i = 0; i < dom.attributes.length; i ++) {
+                var attr = dom.attributes[i];
+                div_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
+                div_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
+            }
+            div_dom.append('/>');
+            
+            div_dom.css('padding-left', indent_width* indent);
+            return {xml: [div_dom], text: []};
+        }
+
+        var xml_lines = []
+        var start_tag_dom = $('<div></div>').addClass('xml-tag');
+        var expand_button = $('<span></span>')
+            .addClass('xml-expand')
+            .text('[ - ]')
+            .css('cursor', 'pointer')
+            .attr('id', 'xml-expand-' + current_tag_seq)
+            .data('tag-id', current_tag_seq)
+            .data('status', 'open');
+
+        if (indent > 2) {
+            expand_button.addClass('xml-default-expand');
+        }
+        start_tag_dom.append(expand_button);
+        start_tag_dom.attr('id', 'start-tag-' + current_tag_seq);
+
+        start_tag_dom.append($('<span></span>').text('<' + dom.nodeName));
+        for (var i = 0; i < dom.attributes.length; i ++) {
+            var attr = dom.attributes[i];
+            start_tag_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
+            start_tag_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
+        }
+        start_tag_dom.append('>');
+        start_tag_dom.css('padding-left', indent_width * indent);
+        xml_lines.push(start_tag_dom);
+
+        for (var i = 0; i < dom.childNodes.length; i ++) {
+            var child_result = walk_akoma_xml(dom.childNodes[i], indent + 1);
+            child_result.xml.map(function(line){ 
+                line.addClass('tag-parent-' + current_tag_seq);
+            });
+            xml_lines = xml_lines.concat(child_result.xml);
+        }
+        var end_tag_dom = $('<div></div>').addClass('xml-tag');
+        end_tag_dom.text('</' + dom.nodeName + '>');
+        end_tag_dom.addClass('tag-parent-' + current_tag_seq);
+        xml_lines.push(end_tag_dom);
+        end_tag_dom.css('padding-left', indent_width * indent);
+        return {xml: xml_lines, text: []};
+    }
+
+    if (dom.nodeType == 3) { // Text
+        var div_dom = $('<div></div>').addClass('xml-tag');
+        div_dom.text(dom.nodeValue);
+        div_dom.css('padding-left', indent_width * indent);
+        return {xml: [div_dom], text: []};
+    }
+
+    console.log(dom.nodeType);
+    console.log(dom.childNodes);
+    throw 'over';
+};
+
+$('#xml').on('click', '.xml-expand', function(e){
+        e.preventDefault();
+        if ($(this).data('status') == 'open') {
+            $(this).data('status', 'close');
+            $(this).text('[ + ]');
+            $('.xml-tag.tag-parent-' + $(this).data('tag-id')).hide();
+        } else {
+            $(this).data('status', 'open');
+            $(this).text('[ - ]');
+            $('.xml-tag.tag-parent-' + $(this).data('tag-id')).each(function(){
+                 var all_open = true;
+                 $(this).attr('class').split(/\s+/).map(function(c){
+                         if (c.match(/tag-parent-[0-9]*/) && $('#xml-expand-' + c.split('-')[2]).data('status') == 'close') {
+                             all_open = false;
+                         }
+                 });
+                 if (all_open) {
+                     $(this).show();
+                 }
+            });
+        }
+
+});
+$('#list').on('click', 'a', function(e){
+        e.preventDefault();
+        $.get($(this).data('file'), function(ret){
+                var results = walk_akoma_xml(ret)
+                $('#xml').html('');
+                results.xml.map( function(line) { $('#xml').append(line); } );
+                $('.xml-default-expand').click();
+
+                $('#text').html('');
+                results.text.map( $('text').append );
+        }, 'xml');
+});
+</script>
+</body>
+</html>
