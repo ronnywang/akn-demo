@@ -5,6 +5,10 @@
 <script src="//ajax.googleapis.com/ajax/libs/jquery/2.1.4/jquery.min.js"></script>
 <link rel="stylesheet" href="//cdnjs.cloudflare.com/ajax/libs/twitter-bootstrap/3.3.6/css/bootstrap.css">
 <style>
+eol {
+    display: block;
+}
+
 #list {
     overflow: scroll;
     max-height: 500px;
@@ -32,6 +36,23 @@
     color: #9a3503;
 }
 
+#xml .xml-tag-mouseover {
+    background: yellow;
+}
+
+#context {
+    overflow: scroll;
+    max-height: 500px;
+}
+
+#context .context-mouseover {
+    background: yellow;
+}
+
+#context .context-dom {
+    cursor: pointer;
+}
+
 </style>
 </head>
 <body>
@@ -42,10 +63,17 @@
         <div class="col-md-5" id="xml">
             XML
         </div>
-        <div class="col-md-5">
+        <div class="col-md-5" id="context">
             Preview
         </div>
+        <script id="context-template" type="text/html">
+            <p class="field" style="text-align: left" data-key="docProponent">oo地方法院o事判決</p>
+            <p class="field" style="text-align: right" data-key="docNumber">ooo年度o字第ooo號</p>
+            <div class="field" data-key="parties">原告: ooo</div>
+            <div class="field" data-key="summary">主文: ooo</div>
+        </script>
     </div>
+    debug: <div id="debug"></div>
 </div>
 <script>
 $.get('data/list', function(data){
@@ -68,14 +96,20 @@ var walk_akoma_xml = function(dom, indent){
 
     if (dom.nodeType == 9) { // Document
         tag_seq = 0;
+        dom.childNodes[0]._parents = {};
         return walk_akoma_xml(dom.childNodes[0], 0);
     }
 
     if (dom.nodeType == 8) { // Comment
-        return {xml: [], text: []};
+        return {xml: [], context: {}};
     }
 
     if (dom.nodeType == 1) { // Element
+        // 處理內文部份
+
+        var context_dom = $(document.createElement(dom.nodeName));
+        context_dom.addClass('context-dom');
+
         if (dom.childNodes.length == 0) { // 沒內容的 XML
             var div_dom = $('<div></div>').addClass('xml-tag');
             div_dom.text('<' + dom.nodeName);
@@ -83,11 +117,15 @@ var walk_akoma_xml = function(dom, indent){
                 var attr = dom.attributes[i];
                 div_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
                 div_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
+
+                context_dom.attr(attr.nodeName, attr.nodeValue);
             }
             div_dom.append('/>');
+
+            context_dom.text(dom.nodeValue);
             
             div_dom.css('padding-left', indent_width* indent);
-            return {xml: [div_dom], text: []};
+            return {xml: [div_dom], context: context_dom};
         }
 
         var xml_lines = []
@@ -105,37 +143,45 @@ var walk_akoma_xml = function(dom, indent){
         }
         start_tag_dom.append(expand_button);
         start_tag_dom.attr('id', 'start-tag-' + current_tag_seq);
+        context_dom.data('tag-id', current_tag_seq);
 
         start_tag_dom.append($('<span></span>').text('<' + dom.nodeName));
         for (var i = 0; i < dom.attributes.length; i ++) {
             var attr = dom.attributes[i];
             start_tag_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
             start_tag_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
+
+            context_dom.attr(attr.nodeName, attr.nodeValue);
         }
         start_tag_dom.append('>');
         start_tag_dom.css('padding-left', indent_width * indent);
         xml_lines.push(start_tag_dom);
 
+        parents = JSON.parse(JSON.stringify(dom._parents)); // clone parents
+        parents[dom.nodeName] = true;
+
         for (var i = 0; i < dom.childNodes.length; i ++) {
+            dom.childNodes[i]._parents = parents;
             var child_result = walk_akoma_xml(dom.childNodes[i], indent + 1);
             child_result.xml.map(function(line){ 
                 line.addClass('tag-parent-' + current_tag_seq);
             });
             xml_lines = xml_lines.concat(child_result.xml);
+            context_dom.append(child_result.context);
         }
         var end_tag_dom = $('<div></div>').addClass('xml-tag');
         end_tag_dom.text('</' + dom.nodeName + '>');
         end_tag_dom.addClass('tag-parent-' + current_tag_seq);
         xml_lines.push(end_tag_dom);
         end_tag_dom.css('padding-left', indent_width * indent);
-        return {xml: xml_lines, text: []};
+        return {xml: xml_lines, context: context_dom};
     }
 
     if (dom.nodeType == 3) { // Text
         var div_dom = $('<div></div>').addClass('xml-tag');
         div_dom.text(dom.nodeValue);
         div_dom.css('padding-left', indent_width * indent);
-        return {xml: [div_dom], text: []};
+        return {xml: [div_dom], context: dom.nodeValue};
     }
 
     console.log(dom.nodeType);
@@ -166,6 +212,53 @@ $('#xml').on('click', '.xml-expand', function(e){
         }
 
 });
+
+var mouseenter_stack = [];
+
+$('#context').on('mouseenter', '.context-dom', function(e){
+    e.preventDefault();
+
+    var target = e.target;
+
+    $(target).addClass('context-mouseover');
+    if (mouseenter_stack.length && $(mouseenter_stack[mouseenter_stack.length - 1]).data('tag-id') != $(target).data('tag-id')) {
+        $(mouseenter_stack[mouseenter_stack.length - 1]).removeClass('context-mouseover');
+    }
+    if (!mouseenter_stack.length || $(mouseenter_stack[mouseenter_stack.length - 1]).data('tag-id') != $(target).data('tag-id')) {
+        mouseenter_stack.push(target);
+    }
+
+    $('#start-tag-' + $(target).data('tag-id')).addClass('xml-tag-mouseover');
+}) .on('mouseleave', '.context-dom', function(e){
+    e.preventDefault();
+
+    while (dom = mouseenter_stack.pop()) {
+        $(dom).removeClass('context-mouseover');
+        if ($(dom).data('tag-id') == $(e.target).data('tag-id')) {
+            break;
+        }
+    }
+
+    if (mouseenter_stack.length) {
+        $(mouseenter_stack[mouseenter_stack.length - 1]).addClass('context-mouseover');
+    }
+
+    $('#xml .xml-tag.xml-tag-mouseover').removeClass('xml-tag-mouseover');
+}) .on('click', '*', function(e){
+    e.preventDefault();
+
+    var id = $(e.target).data('tag-id');
+    $('#start-tag-' + id).attr('class').split(/\s+/).map(function(c){
+        if (c.match(/tag-parent-[0-9]*/) && $('#xml-expand-' + c.split('-')[2]).data('status') == 'close') {
+            $('#xml-expand-' + c.split('-')[2]).click();
+        }
+    });
+    if ($('#xml-expand-' + id).length && $('#xml-expand-' + id).data('status') == 'close') {
+        $('#xml-expand-' + id).click();
+    }
+    $('#xml')[0].scrollTop += $('#xml-expand-' + id).position().top - 200;
+});
+
 $('#list').on('click', 'a', function(e){
         e.preventDefault();
         $.get($(this).data('file'), function(ret){
@@ -174,8 +267,7 @@ $('#list').on('click', 'a', function(e){
                 results.xml.map( function(line) { $('#xml').append(line); } );
                 $('.xml-default-expand').click();
 
-                $('#text').html('');
-                results.text.map( $('text').append );
+                $('#context').html(results.context);
         }, 'xml');
 });
 </script>
