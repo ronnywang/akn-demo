@@ -38,6 +38,7 @@ eol {
 
 #xml .xml-tag-mouseover {
     background: yellow;
+    display: block;
 }
 
 #context {
@@ -47,6 +48,11 @@ eol {
 
 #context .context-mouseover {
     background: yellow;
+}
+
+#context .context-mouseover-block {
+    background: yellow;
+    display: block;
 }
 
 #context .context-dom {
@@ -90,14 +96,14 @@ $.get('data/list', function(data){
 
 var tag_seq = 0;
 var indent_width = 20;
-var walk_akoma_xml = function(dom, indent){
+var walk_akoma_xml = function(dom, indent, parent_tag_seq){
     tag_seq ++;
     var current_tag_seq = tag_seq;
 
     if (dom.nodeType == 9) { // Document
         tag_seq = 0;
         dom.childNodes[0]._parents = {};
-        return walk_akoma_xml(dom.childNodes[0], 0);
+        return walk_akoma_xml(dom.childNodes[0], 0, current_tag_seq);
     }
 
     if (dom.nodeType == 8) { // Comment
@@ -108,17 +114,23 @@ var walk_akoma_xml = function(dom, indent){
         // 處理內文部份
 
         var context_dom = $(document.createElement(dom.nodeName));
+        context_dom.data('tag-id', current_tag_seq);
         context_dom.addClass('context-dom');
 
         if (dom.childNodes.length == 0) { // 沒內容的 XML
             var div_dom = $('<div></div>').addClass('xml-tag');
             div_dom.text('<' + dom.nodeName);
+            div_dom.data('tag-id', current_tag_seq);
             for (var i = 0; i < dom.attributes.length; i ++) {
                 var attr = dom.attributes[i];
                 div_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
                 div_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
 
-                context_dom.attr(attr.nodeName, attr.nodeValue);
+                if (attr.nodeName == 'id') {
+                    context_dom.attr('old-id', attr.nodeValue);
+                } else {
+                    context_dom.attr(attr.nodeName, attr.nodeValue);
+                }
             }
             div_dom.append('/>');
 
@@ -129,7 +141,9 @@ var walk_akoma_xml = function(dom, indent){
         }
 
         var xml_lines = []
-        var start_tag_dom = $('<div></div>').addClass('xml-tag');
+        var start_tag_dom = $('<div></div>').addClass('xml-tag')
+            .data('tag-id', current_tag_seq)
+                ;
         var expand_button = $('<span></span>')
             .addClass('xml-expand')
             .text('[ - ]')
@@ -144,6 +158,7 @@ var walk_akoma_xml = function(dom, indent){
         start_tag_dom.append(expand_button);
         start_tag_dom.attr('id', 'start-tag-' + current_tag_seq);
         context_dom.data('tag-id', current_tag_seq);
+        context_dom.attr('id', 'context-dom-' + current_tag_seq);
 
         start_tag_dom.append($('<span></span>').text('<' + dom.nodeName));
         for (var i = 0; i < dom.attributes.length; i ++) {
@@ -151,7 +166,11 @@ var walk_akoma_xml = function(dom, indent){
             start_tag_dom.append($('<span></span>').addClass('xml-attr-key').text(attr.nodeName + '='));
             start_tag_dom.append($('<span></span>').addClass('xml-attr-value').text('"' + attr.nodeValue + '"'));
 
-            context_dom.attr(attr.nodeName, attr.nodeValue);
+            if (attr.nodeName == 'id') {
+                context_dom.attr('old-id', attr.nodeValue);
+            } else {
+                context_dom.attr(attr.nodeName, attr.nodeValue);
+            }
         }
         start_tag_dom.append('>');
         start_tag_dom.css('padding-left', indent_width * indent);
@@ -162,7 +181,7 @@ var walk_akoma_xml = function(dom, indent){
 
         for (var i = 0; i < dom.childNodes.length; i ++) {
             dom.childNodes[i]._parents = parents;
-            var child_result = walk_akoma_xml(dom.childNodes[i], indent + 1);
+            var child_result = walk_akoma_xml(dom.childNodes[i], indent + 1, current_tag_seq);
             child_result.xml.map(function(line){ 
                 line.addClass('tag-parent-' + current_tag_seq);
             });
@@ -179,6 +198,7 @@ var walk_akoma_xml = function(dom, indent){
 
     if (dom.nodeType == 3) { // Text
         var div_dom = $('<div></div>').addClass('xml-tag');
+        div_dom.data('tag-id', parent_tag_seq);
         div_dom.text(dom.nodeValue);
         div_dom.css('padding-left', indent_width * indent);
         return {xml: [div_dom], context: dom.nodeValue};
@@ -257,6 +277,37 @@ $('#context').on('mouseenter', '.context-dom', function(e){
         $('#xml-expand-' + id).click();
     }
     $('#xml')[0].scrollTop += $('#xml-expand-' + id).position().top - 200;
+});
+
+$('#xml').on('mouseenter', '.xml-tag', function(e){
+    e.preventDefault();
+
+    var target = e.target;
+
+    $(this).addClass('xml-tag-mouseover');
+
+    var id = $(this).data('tag-id');
+    if ($('#context-dom-' + id).length) {
+        $('#context-dom-' + id).addClass('context-mouseover');
+        $('#context-dom-' + id).find('*').addClass('context-mouseover');
+    }
+}) .on('mouseleave', '.xml-tag', function(e){
+    e.preventDefault();
+    $(this).removeClass('xml-tag-mouseover');
+    $('#xml .xml-tag').removeClass('xml-tag-mouseover');
+    var id = $(this).data('tag-id');
+    if ($('#context-dom-' + id).length) {
+        $('#context-dom-' + id).removeClass('context-mouseover');
+        $('#context-dom-' + id).find('*').removeClass('context-mouseover');
+    }
+
+}) .on('click', '.xml-tag', function(e){
+    e.preventDefault();
+
+    var id = $(this).data('tag-id');
+    if ($('#context-dom-' + id).length) {
+        $('#context')[0].scrollTop += $('#context-dom-' + id).position().top - 200;
+    }
 });
 
 $('#list').on('click', 'a', function(e){
